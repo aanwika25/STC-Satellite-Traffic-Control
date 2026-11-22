@@ -1,0 +1,17 @@
+[
+  "tests/test_data_formats.py::test_cache_and_retry_rules",
+  "tests/test_data_formats.py::test_consistent_state_vector_is_used",
+  "tests/test_data_formats.py::test_inconsistent_state_vector_falls_back_to_keplerian",
+  "tests/test_data_formats.py::test_no_gp_data_message_is_an_error",
+  "tests/test_data_formats.py::test_omm_csv",
+  "tests/test_data_formats.py::test_omm_json",
+  "tests/test_data_formats.py::test_omm_xml",
+  "tests/test_data_formats.py::test_six_digit_catalogue_number",
+  "tests/test_data_formats.py::test_tle_still_supported",
+  "tests/test_engine.py::test_manoeuvre_zero_dv_preserves_baseline_and_dv_increases_miss",
+  "tests/test_engine.py::test_numerical_vs_sgp4_short_arc",
+  "tests/test_engine.py::test_passes_shift_small_for_small_dv",
+  "tests/test_engine.py::test_sample_screening_finds_engineered_events",
+  "tests/test_engine.py::test_sgp4_reference_case_06251",
+  "tests/test_engine.py::test_tle_roundtrip"
+]
