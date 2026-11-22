@@ -1,0 +1,7 @@
+[theme]
+# Charcoal and gold
+base = "light"
+primaryColor = "#292524"
+backgroundColor = "#FAFAF9"
+secondaryBackgroundColor = "#E7E5E4"
+textColor = "#1C1917"
