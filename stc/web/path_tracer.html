@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+:root{--ink:#1C1917;--muted:#78716C;--line:#E7E5E4;--bg:#FFFFFF;--panel:#FAFAF9;--gold:#CA8A04;--char:#292524}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.4 "Source Sans Pro",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:transparent}
+.bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.btn{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:5px 12px;cursor:pointer;font:inherit}
+.btn:hover{border-color:var(--muted)}
+select{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;background:var(--bg);color:var(--ink)}
+.clock{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--char)}
+.grid{display:grid;grid-template-columns:1.55fr 1fr;gap:12px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;position:relative}
+.card h4{margin:0 0 6px;font-size:13px;font-weight:600}
+.card h4 span{font-weight:400;color:var(--muted)}
+canvas{display:block;width:100%;border-radius:6px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:none;border-right:1px solid var(--line);background:var(--bg);padding:6px 16px;cursor:pointer;font:inherit;color:var(--ink)}
+.seg button:last-child{border-right:none}
+.seg button.on{background:var(--char);color:#fff}
+.legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.tip{position:absolute;pointer-events:none;background:var(--char);color:#fff;border-radius:6px;padding:5px 8px;font-size:12px;display:none;white-space:nowrap;z-index:5}
+.count{color:var(--muted);font-size:12px}
+.pick{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel);font-size:12.5px}
+.pick b{font-weight:600}
+.pick .muted{color:var(--muted)}
+.pick ul{margin:6px 0 0;padding-left:18px}
+.pick li{margin:2px 0}
+.pick a{color:#92400E;cursor:pointer;text-decoration:underline}
+.blinkdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#EAB308;margin-right:5px;vertical-align:-1px;animation:bl .25s steps(1) infinite}
+.ringdot{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #A16207;margin-right:5px;vertical-align:-1px}
+@keyframes bl{50%{opacity:0}}
+</style></head>
+<body>
+<div class="bar">
+  <button class="btn" id="play">❚❚ Pause</button>
+  <select id="speed" title="Simulation speed">
+    <option value="1">1× real time</option><option value="10">10×</option><option value="60" selected>60×</option><option value="300">300×</option><option value="1200">1200×</option>
+  </select>
+  <button class="btn" id="now">⟲ Back to start time</button>
+  <button class="btn" id="calcTime" style="display:none">Go to calculator time</button>
+  <span class="clock" id="clock"></span>
+</div>
+<div class="grid">
+  <div class="card">
+    <h4>World map <span>· hover for names, click an object to trace its path</span></h4>
+    <canvas id="map"></canvas>
+    <div class="bar" style="margin:10px 0 0">
+      <div class="seg" id="filter"><button data-f="LEO" class="on">LEO</button><button data-f="MEO">MEO</button><button data-f="ALL">All</button></div>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="legend" id="legend">
+      <span><i style="background:#16A34A"></i>Indian satellites</span>
+      <span><i style="background:#0EA5E9"></i>International satellites</span>
+      <span><i style="background:#111111"></i>Debris and rocket bodies</span>
+      <span><i style="background:#CA8A04;box-shadow:0 0 0 2px #292524"></i>Tracked satellite</span>
+      <span><span class="blinkdot"></span>Within the threshold of the clicked object</span>
+      <span><span class="ringdot"></span>Nearest approaches (outside the threshold)</span>
+      <span><i style="background:#292524;border-radius:2px"></i>Ground stations</span>
+    </div>
+    <div class="pick" id="pick"></div>
+    <div class="tip" id="tip"></div>
+  </div>
+  <div class="card">
+    <h4>Globe <span>· drag to rotate, scroll to zoom, click an object to trace its orbit</span></h4>
+    <canvas id="globe"></canvas>
+    <div class="tip" id="tip2"></div>
+  </div>
+</div>
+<script>__ENGINE__</script>
+<script>
+const CFG = __DATA__;
+(function () {
+"use strict";
+const $ = (id) => document.getElementById(id), DEG = OG.DEG;
+const COL = { IN: "#16A34A", INTL: "#0EA5E9", DEB: "#111111", SEL: "#CA8A04", CHAR: "#292524", RED: "#B91C1C", PICK: "#0D9488", NEAR: "#A16207" };
+const CALC = CFG.calc || null;
+const objs = CFG.objects.map((o, i) => { const s = OG.fromElements(o.n, o.e); s.cat = o.t === "DEBRIS" || o.t === "ROCKET BODY" ? "DEB" : (o.c === "IN" ? "IN" : "INTL");
+  s.type = o.t; s.sel = !!o.sel; s.cj = !!o.cj; s.syn = !!o.syn; s.idx = i; const alt = s.aKm - OG.RE; s.regime = alt < 2000 ? "LEO" : alt < 35000 ? "MEO" : "GEO"; return s; }).filter((s) => !s.error);
+const sel = objs.find((s) => s.sel);
+// calculator objects (Object A / Object B), always shown
+const calcObjs = [];
+// A calculator object that is already in the catalogue (the calculator is linked to the dashboard) is not drawn
+// twice: the tracked satellite stays as it is, any other object is re-styled as calculator object A/B.
+const catBySat = new Map(objs.map((s) => [String(CFG.objects[s.idx].e[0]), s]));
+if (CALC) CALC.objects.forEach((o, i) => { const same = catBySat.get(String(o.e.satnum));
+  if (same && same.sel) { same.calcLink = o.id; return; }
+  if (same) { same.calc = o.id; same.col = o.color; same.calcName = `${o.id}: ${same.name}`; calcObjs.push(same); return; }
+  const s = OG.fromElements(o.n, o.e); if (s.error) return; s.calc = o.id; s.col = o.color; s.cat = "CALC"; s.type = "PAYLOAD";
+  s.idx = 100000 + i; const alt = s.aKm - OG.RE; s.regime = alt < 2000 ? "LEO" : alt < 35000 ? "MEO" : "GEO"; s.calcName = `${o.id}: ${o.n}`; calcObjs.push(s); objs.push(s); });
+const calcBlink = new Set(CALC && CALC.tca && CALC.tca.within ? calcObjs.filter((s) => s.calc === "B") : []);
+let simJd = CFG.simJd, playing = true, filter = "LEO", land = null, lastTs = 0, view = { yaw: -1.0, pitch: 0.45, zoom: 1 };
+let mapBg = null, mapSize = "", pts = [], gpts = [], frameNo = 0;
+// position of an object at the current simulation time, computed once per frame and shared by map and globe
+function cur(s) { if (s._f !== frameNo) { s._f = frameNo; s._st = OG.propJd(s, simJd); } return s._st; }
+let picked = null, pickConj = new Map(), pickNear = [], pickToken = 0, pickDone = false, pickInfo = {};
+const tracks = new Map();
+
+// ---------- helpers
+const pad = (n) => String(n).padStart(2, "0");
+function fmt(jd, sec = true) { const d = OG.dateFromJd(jd); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}${sec ? ":" + pad(d.getUTCSeconds()) : ""} UTC`; }
+function dur(days) { const s = Math.max(0, Math.round(days * 86400)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h}h ${pad(m)}m` : `${m}m`; }
+const km = (d) => d < 1 ? `${(d * 1000).toFixed(0)} m` : `${d.toFixed(2)} km`;
+function geo(jd, r) { const g = OG.ecefToGeodetic(OG.eciToEcef(r, jd)); return { lat: g.lat / DEG, lon: g.lon / DEG, alt: g.alt }; }
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const blinkOn = () => Math.floor(performance.now() / 125) % 2 === 0;
+const isBlink = (s) => pickConj.has(s) || calcBlink.has(s);
+const visible = (s) => s.sel || s.calc || s === picked || isBlink(s) || pickNear.some((n) => n.o === s) || filter === "ALL" || s.regime === filter;
+const drawOrder = objs.filter((s) => s.cat !== "DEB").concat(objs.filter((s) => s.cat === "DEB"));   // debris drawn on top
+const kindOf = (s) => (s.calc ? `Calculator object ${s.calc}` : s.cat === "DEB" ? (s.type === "ROCKET BODY" ? "Rocket body" : "Debris") : s.cat === "IN" ? "Indian satellite" : "International satellite") + (s.syn ? " (synthetic demo)" : "");
+const nameOf = (s) => s.calcName || s.name;
+function fit(c, h) { const dpr = window.devicePixelRatio || 1, w = c.clientWidth; if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); c.style.height = h + "px"; }
+  const x = c.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); return { x, w, h }; }
+
+// calculator burn paths: precompute ground positions once
+const burns = CALC ? (CALC.burns || []).map((b) => ({ ...b, g: b.pts.map((p) => [p[0], geo(p[0], [p[1], p[2], p[3]]), [p[1], p[2], p[3]]]) })) : [];
+function burnPos(b, jd) { const p = b.pts; if (!p.length || jd < p[0][0] || jd > p[p.length - 1][0]) return null; let i = 1; while (i < p.length && p[i][0] < jd) i++;
+  const a = p[i - 1], c = p[Math.min(i, p.length - 1)], f = c[0] > a[0] ? (jd - a[0]) / (c[0] - a[0]) : 0; return [1, 2, 3].map((k) => a[k] + f * (c[k] - a[k])); }
+
+// ---------- land outlines (world-atlas via CDN; the view still works without them)
+function loadLand() {
+  const s1 = document.createElement("script"); s1.src = "https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js";
+  s1.onload = () => fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json").then((r) => r.json()).then((t) => {
+    const f = topojson.feature(t, t.objects.land), feats = f.features || [f], polys = [];
+    feats.forEach((ft) => { const g = ft.geometry; if (!g) return; if (g.type === "Polygon") polys.push(g.coordinates); else if (g.type === "MultiPolygon") g.coordinates.forEach((c) => polys.push(c)); });
+    land = polys; mapSize = "";
+  }).catch(() => {});
+  document.head.appendChild(s1);
+}
+
+function trackOf(s) {
+  const t = tracks.get(s); if (t && Math.abs(simJd - t.jd) < 60 / 86400) return t.pts;
+  const per = s.periodMin / 1440, step = Math.max(30, s.periodMin * 60 / 240) / 86400, out = [];
+  for (let jd = simJd - per / 2; jd <= simJd + 1.5 * per; jd += step) { const st = OG.propJd(s, jd); if (st) out.push([jd, geo(jd, st.r), st.r]); }
+  tracks.set(s, { jd: simJd, pts: out }); return out;
+}
+
+// ---------- close approaches of the clicked object (chunked so the animation keeps running)
+function pick(s) {
+  picked = s; pickConj = new Map(); pickNear = []; pickDone = false; const tok = ++pickToken;
+  if (!s) { renderPick(); return; }
+  const thr = CFG.thr, far = Math.max(15, 3 * thr), pad_ = far + 10;
+  const cands = objs.filter((o) => o !== s && !(o.perigeeKm > s.apogeeKm + pad_ || o.apogeeKm < s.perigeeKm - pad_));
+  // with a very large catalogue, keep the browser responsive by checking the next 24 h only
+  const hours = cands.length > 1500 ? Math.min(CFG.windowH, 24) : CFG.windowH, step = 120, jd0 = simJd, jd1 = simJd + hours / 24;
+  const grid = []; for (let jd = jd0; jd <= jd1 + 1e-9; jd += step / 86400) grid.push(jd);
+  const A = grid.map((jd) => OG.propJd(s, jd)), gate = far + 20, best = new Map();
+  const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  let i = 0; pickInfo = { cands: cands.length, progress: 0, hours };
+  renderPick();
+  (function chunk() {
+    if (tok !== pickToken) return;
+    const t0 = performance.now();
+    while (i < cands.length && performance.now() - t0 < 30) {
+      const o = cands[i++]; let prev = null;
+      for (let k = 0; k < grid.length; k++) {
+        const a = A[k], b = OG.propJd(o, grid[k]); if (!a || !b) { prev = null; continue; }
+        const dr = OG.sub(b.r, a.r), dv = OG.sub(b.v, a.v), d = Math.sqrt(dot3(dr, dr)), rr = dot3(dr, dv) / d;
+        if (prev && prev.rr < 0 && rr >= 0) {
+          const bb = dot3(prev.dv, prev.dv), tau = Math.max(0, Math.min(step, bb > 0 ? -dot3(prev.dr, prev.dv) / bb : 0));
+          const dl = Math.hypot(prev.dr[0] + tau * prev.dv[0], prev.dr[1] + tau * prev.dv[1], prev.dr[2] + tau * prev.dv[2]);
+          if (dl < gate) {
+            const res = OG.goldenMin((x) => { const p = OG.propJd(s, x), q = OG.propJd(o, x); return p && q ? OG.norm(OG.sub(q.r, p.r)) : 1e9; }, grid[k - 1], grid[k], 0.0005 / 86400);
+            if (res.f < far) { const pv = best.get(o); if (!pv || res.f < pv.miss) best.set(o, { jd: res.x, miss: res.f }); if (res.f <= thr) pickConj.set(o, best.get(o)); }
+          }
+        }
+        prev = { rr, dr, dv };
+      }
+    }
+    pickInfo.progress = i / Math.max(1, cands.length);
+    if (i < cands.length) { renderPick(); setTimeout(chunk, 0); return; }
+    pickNear = [...best.entries()].filter(([o, e]) => e.miss > thr).sort((a, b) => a[1].miss - b[1].miss).slice(0, 3).map(([o, e]) => ({ o, ...e }));
+    pickDone = true; renderPick();
+  })();
+}
+function renderPick() {
+  const el = $("pick");
+  if (!picked) { el.innerHTML = `<span class="muted">Click any object on the map or globe to show its path. Objects that come within ${CFG.thr} km of it in the next ${CFG.windowH} h blink gold.</span>` + calcSummary(); return; }
+  const st = OG.propJd(picked, simJd), g = st ? geo(simJd, st.r) : null;
+  let h = `<b>${esc(nameOf(picked))}</b> <span class="muted">· ${kindOf(picked)} · ${picked.regime} · NORAD ${esc(picked.satnum)}${g ? ` · alt ${g.alt.toFixed(0)} km` : ""} · period ${picked.periodMin.toFixed(1)} min</span> &nbsp;<a id="clearPick">Clear</a><br>`;
+  const li = (o, e) => `<li><a data-i="${o.idx}">${esc(nameOf(o))}</a> <span class="muted">(${kindOf(o).toLowerCase()})</span> · miss <b>${km(e.miss)}</b> at ${fmt(e.jd, false)}${e.jd > simJd ? ` <span class="muted">(in ${dur(e.jd - simJd)})</span>` : ` <span class="muted">(passed)</span>`}</li>`;
+  const list = [...pickConj.entries()].sort((a, b) => a[1].jd - b[1].jd);
+  if (!pickDone) h += `<span class="muted">Checking ${pickInfo.cands} objects for close approaches in the next ${pickInfo.hours} h… ${Math.round(pickInfo.progress * 100)}%</span>`;
+  else if (list.length) h += `<span class="blinkdot"></span><b>${list.length} object${list.length > 1 ? "s" : ""} within ${CFG.thr} km</b> <span class="muted">in the next ${pickInfo.hours} h, blinking gold:</span><ul>` + list.map(([o, e]) => li(o, e)).join("") + "</ul>";
+  else h += `<b>No object comes within ${CFG.thr} km</b> <span class="muted">in the next ${pickInfo.hours} h (${pickInfo.cands} objects checked), so nothing blinks.</span>`;
+  if (pickDone && pickNear.length) h += `<br><span class="ringdot"></span><span class="muted">Nearest approaches outside the threshold (ringed):</span><ul>` + pickNear.map((n) => li(n.o, n)).join("") + "</ul>";
+  el.innerHTML = h + calcSummary();
+  const c = $("clearPick"); if (c) c.onclick = () => pick(null);
+  el.querySelectorAll("a[data-i]").forEach((a) => a.onclick = () => pick(objs.find((o) => o.idx === +a.dataset.i)));
+}
+function calcSummary() {
+  if (!CALC) return "";
+  let h = `<hr style="border:none;border-top:1px solid var(--line);margin:8px 0"><b>Calculator</b> <span class="muted">· ${esc(CALC.label)}</span>`;
+  if (CALC.tca) h += `<br>Closest approach A–B: <b>${km(CALC.tca.miss)}</b> at ${fmt(CALC.tca.jd, false)}` + (CALC.tca.within ? ` <span class="blinkdot" style="margin-left:6px"></span>within the ${CALC.tca.screen} km screening distance (B blinks gold)` : ` <span class="muted">(outside the ${CALC.tca.screen} km screening distance)</span>`);
+  burns.forEach((b) => { h += `<br><span style="color:${b.color}">━ ━</span> ${esc(b.name)} <span class="muted">· burn at ${fmt(b.jdBurn, false)}</span>`; });
+  if (Math.abs(simJd - CALC.startJd) > 2) h += `<br><span class="muted">The calculator objects use their own epoch. Press <b>Go to calculator time</b> to see them at the analysed time.</span>`;
+  return h;
+}
+
+// ---------- 2D map
+function drawMapBg(w, h) {
+  const c = document.createElement("canvas"), dpr = window.devicePixelRatio || 1; c.width = w * dpr; c.height = h * dpr;
+  const x = c.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const X = (lo) => ((lo + 180) / 360) * w, Y = (la) => ((90 - la) / 180) * h;
+  x.fillStyle = "#EEF4F8"; x.fillRect(0, 0, w, h);
+  if (land) { x.fillStyle = "#DDD6CC"; x.strokeStyle = "#C9C1B5"; x.lineWidth = 0.6;
+    for (const poly of land) { x.beginPath(); for (const ring of poly) { let prev = null; ring.forEach((p, i) => { if (!i || (prev !== null && Math.abs(p[0] - prev) > 180)) x.moveTo(X(p[0]), Y(p[1])); else x.lineTo(X(p[0]), Y(p[1])); prev = p[0]; }); } x.fill("evenodd"); x.stroke(); } }
+  x.strokeStyle = "rgba(41,37,36,.08)"; x.lineWidth = 1; x.font = "10px system-ui"; x.fillStyle = "#A8A29E";
+  for (let lo = -150; lo <= 150; lo += 30) { x.beginPath(); x.moveTo(X(lo), 0); x.lineTo(X(lo), h); x.stroke(); x.fillText(lo + "°", X(lo) + 3, h - 4); }
+  for (let la = -60; la <= 60; la += 30) { x.beginPath(); x.moveTo(0, Y(la)); x.lineTo(w, Y(la)); x.stroke(); x.fillText(la + "°", 3, Y(la) - 3); }
+  return c;
+}
+function covAngle(altKm, maskDeg) { const e = maskDeg * DEG, re = OG.RE84; return Math.acos((re / (re + altKm)) * Math.cos(e)) - e; }
+function dest(lat, lon, brg, ang) { const la = lat * DEG, lo = lon * DEG, la2 = Math.asin(Math.sin(la) * Math.cos(ang) + Math.cos(la) * Math.sin(ang) * Math.cos(brg));
+  return [la2 / DEG, (((lo + Math.atan2(Math.sin(brg) * Math.sin(ang) * Math.cos(la), Math.cos(ang) - Math.sin(la) * Math.sin(la2))) / DEG + 540) % 360) - 180]; }
+function polyline2D(x, X, Y, gpts, style, width, dash) {
+  x.strokeStyle = style; x.lineWidth = width; x.setLineDash(dash || []); x.beginPath(); let pv = null;
+  gpts.forEach((g) => { if (!g) { pv = null; return; } if (pv === null || Math.abs(g.lon - pv) > 180) x.moveTo(X(g.lon), Y(g.lat)); else x.lineTo(X(g.lon), Y(g.lat)); pv = g.lon; });
+  x.stroke(); x.setLineDash([]);
+}
+function drawTrack2D(x, X, Y, s, color, width) {
+  const tr = trackOf(s);
+  polyline2D(x, X, Y, tr.map(([jd, g]) => (jd <= simJd ? g : null)), color + "70", width, [4, 4]);
+  polyline2D(x, X, Y, tr.map(([jd, g]) => (jd >= simJd ? g : null)), color, width);
+}
+function drawBlink(x, px, py, r) {
+  if (!blinkOn()) return;
+  x.fillStyle = "#EAB308"; x.strokeStyle = "#A16207"; x.lineWidth = 2; x.beginPath(); x.arc(px, py, r, 0, 7); x.fill(); x.stroke();
+  x.strokeStyle = "rgba(234,179,8,.5)"; x.lineWidth = 3; x.beginPath(); x.arc(px, py, r + 5, 0, 7); x.stroke();
+}
+function cross(x, px, py, color, label) { x.strokeStyle = color; x.lineWidth = 2.5; x.beginPath(); x.moveTo(px - 6, py - 6); x.lineTo(px + 6, py + 6); x.moveTo(px + 6, py - 6); x.lineTo(px - 6, py + 6); x.stroke();
+  if (label) { x.font = "600 11px system-ui"; x.fillStyle = color; x.fillText(label, px + 9, py + 14); } }
+function banner(x, lines) {
+  if (!lines.length) return; x.font = "600 12px system-ui"; const w = Math.max(...lines.map((l) => x.measureText(l.t).width)) + 26, h = 10 + lines.length * 17;
+  x.fillStyle = "rgba(255,255,255,.93)"; x.strokeStyle = "#D6D3D1"; x.lineWidth = 1; x.beginPath(); x.roundRect ? x.roundRect(8, 8, w, h, 7) : x.rect(8, 8, w, h); x.fill(); x.stroke();
+  lines.forEach((l, i) => { const y = 25 + i * 17; if (l.dot === "blink") { if (blinkOn()) { x.fillStyle = "#EAB308"; x.beginPath(); x.arc(19, y - 4, 5, 0, 7); x.fill(); } }
+    else if (l.dot) { x.fillStyle = l.dot; x.beginPath(); x.arc(19, y - 4, 5, 0, 7); x.fill(); }
+    x.fillStyle = l.c || "#1C1917"; x.font = (l.b ? "600 " : "") + "12px system-ui"; x.fillText(l.t, 29, y); });
+}
+function drawMap() {
+  const c = $("map"), w = c.clientWidth, h = Math.round(w / 2), { x } = fit(c, h);
+  if (mapSize !== `${w}x${h}`) { mapBg = drawMapBg(w, h); mapSize = `${w}x${h}`; }
+  x.drawImage(mapBg, 0, 0, w, h);
+  const X = (lo) => ((lo + 180) / 360) * w, Y = (la) => ((90 - la) / 180) * h;
+  const s0 = sel && OG.propJd(sel, simJd), g0 = s0 && geo(simJd, s0.r), cov = covAngle(g0 ? g0.alt : 500, CFG.mask);
+  CFG.stations.forEach((st) => { x.strokeStyle = "rgba(120,113,108,.4)"; x.fillStyle = "rgba(202,138,4,.03)"; x.lineWidth = 1; x.beginPath(); let pl = null;
+    for (let b = 0; b <= 72; b++) { const [la, lo] = dest(st.lat, st.lon, (b / 72) * 2 * Math.PI, cov); if (pl === null || Math.abs(lo - pl) > 180) x.moveTo(X(lo), Y(la)); else x.lineTo(X(lo), Y(la)); pl = lo; }
+    x.fill(); x.stroke(); });
+  if (sel) drawTrack2D(x, X, Y, sel, COL.SEL, 2);
+  // calculator: A/B tracks, manoeuvred paths, burn markers, TCA, station
+  calcObjs.forEach((s) => drawTrack2D(x, X, Y, s, s.col, 2.2));
+  burns.forEach((b) => { polyline2D(x, X, Y, b.g.map((p) => p[1]), b.color, 2, [7, 5]); const g = b.g[0] && b.g[0][1];
+    if (g) { x.fillStyle = b.color; x.beginPath(); x.moveTo(X(g.lon), Y(g.lat) - 7); x.lineTo(X(g.lon) - 6, Y(g.lat) + 5); x.lineTo(X(g.lon) + 6, Y(g.lat) + 5); x.closePath(); x.fill();
+      x.font = "600 11px system-ui"; x.fillText("Burn", X(g.lon) + 8, Y(g.lat) - 6); } });
+  if (CALC && CALC.tca) { const g = geo(CALC.tca.jd, CALC.tca.r); cross(x, X(g.lon), Y(g.lat), "#A16207", `TCA ${km(CALC.tca.miss)}`); }
+  if (CALC && CALC.station) { const st = CALC.station; x.fillStyle = "#E11D48"; x.save(); x.translate(X(st.lon), Y(st.lat)); x.rotate(Math.PI / 4); x.fillRect(-5, -5, 10, 10); x.restore();
+    x.font = "600 11px system-ui"; x.fillText(st.name, X(st.lon) - 9 - x.measureText(st.name).width, Y(st.lat) + 4); }
+  if (picked && picked !== sel && !picked.calc) drawTrack2D(x, X, Y, picked, COL.PICK, 2.5);
+  if (picked) { for (const [o, e] of pickConj) markTca(x, X, Y, e); for (const n of pickNear) markTca(x, X, Y, n); }
+  pts = []; let n = 0; const blinkers = [], rings = [];
+  for (const s of drawOrder) { if (s.sel || s.calc || !visible(s)) continue; const st = cur(s); if (!st) continue; const g = geo(simJd, st.r);
+    const px = X(g.lon), py = Y(g.lat); pts.push([px, py, s, g]);
+    if (isBlink(s)) { blinkers.push([px, py]); continue; }
+    if (pickNear.some((q) => q.o === s)) rings.push([px, py]);
+    if (s !== picked) n++;
+    x.fillStyle = COL[s.cat]; const rd = s.cat === "DEB" ? 1.7 : 2.3; x.fillRect(px - rd, py - rd, 2 * rd, 2 * rd);
+    if (s.cj && !picked) { x.strokeStyle = COL.RED; x.lineWidth = 1.5; x.beginPath(); x.arc(px, py, 6, 0, 7); x.stroke(); } }
+  rings.forEach(([px, py]) => { x.strokeStyle = COL.NEAR; x.lineWidth = 2; x.beginPath(); x.arc(px, py, 7, 0, 7); x.stroke(); });
+  x.font = "11px system-ui"; CFG.stations.forEach((st) => { x.fillStyle = COL.CHAR; x.fillRect(X(st.lon) - 3, Y(st.lat) - 3, 6, 6); pts.push([X(st.lon), Y(st.lat), { station: st }, null]); });
+  // calculator objects on top
+  calcObjs.forEach((s) => { const st = OG.propJd(s, simJd); if (!st) return; const g = geo(simJd, st.r), px = X(g.lon), py = Y(g.lat); pts.push([px, py, s, g]);
+    if (calcBlink.has(s) || pickConj.has(s)) drawBlink(x, px, py, 6);
+    x.fillStyle = s.col; x.strokeStyle = "#fff"; x.lineWidth = 2; x.beginPath(); x.arc(px, py, 6, 0, 7); x.fill(); x.stroke();
+    x.fillStyle = s.col; x.font = "600 12px system-ui"; x.fillText(nameOf(s), px + 9, s.calc === "B" ? py + 18 : py - 8); });
+  burns.forEach((b, i) => { const r = burnPos(b, simJd); if (!r) return; const g = geo(simJd, r), px = X(g.lon), py = Y(g.lat);
+    x.strokeStyle = b.color; x.lineWidth = 2.5; x.beginPath(); x.arc(px, py, 6, 0, 7); x.stroke(); x.font = "11px system-ui"; x.fillStyle = b.color; x.fillText(b.name, px - 9 - x.measureText(b.name).width, py + 32 + i * 13); });
+  if (g0) { x.fillStyle = COL.SEL; x.strokeStyle = COL.CHAR; x.lineWidth = 2; x.beginPath(); x.arc(X(g0.lon), Y(g0.lat), 6, 0, 7); x.fill(); x.stroke();
+    x.fillStyle = COL.CHAR; x.font = "600 12px system-ui"; x.fillText(sel.name, X(g0.lon) + 9, Y(g0.lat) - 8); pts.push([X(g0.lon), Y(g0.lat), sel, g0]); }
+  if (picked && picked !== sel && !picked.calc) { const st = OG.propJd(picked, simJd); if (st) { const g = geo(simJd, st.r), px = X(g.lon), py = Y(g.lat);
+    x.strokeStyle = COL.PICK; x.lineWidth = 2.5; x.beginPath(); x.arc(px, py, 8, 0, 7); x.stroke(); x.fillStyle = COL[picked.cat]; x.beginPath(); x.arc(px, py, 3.5, 0, 7); x.fill();
+    x.fillStyle = COL.PICK; x.font = "600 12px system-ui"; x.fillText(picked.name, px + 11, py - 9); } }
+  blinkers.forEach(([px, py]) => drawBlink(x, px, py, 4.5));
+  // status banner on the map itself
+  const lines = [];
+  if (picked) { lines.push({ t: `Tracing ${nameOf(picked)}`, b: true, dot: COL.PICK });
+    if (!pickDone) lines.push({ t: `Checking close approaches… ${Math.round(pickInfo.progress * 100)}%`, c: "#78716C" });
+    else if (pickConj.size) lines.push({ t: `${pickConj.size} object${pickConj.size > 1 ? "s" : ""} within ${CFG.thr} km in the next ${pickInfo.hours} h (blinking)`, dot: "blink" });
+    else lines.push({ t: `None within ${CFG.thr} km in the next ${pickInfo.hours} h` + (pickNear.length ? ` · nearest ${km(pickNear[0].miss)} (ringed)` : ""), c: "#78716C" }); }
+  else if (CALC && CALC.tca) lines.push({ t: `Calculator: A–B closest approach ${km(CALC.tca.miss)}` + (CALC.tca.within ? " (B blinking)" : ""), b: true, dot: CALC.tca.within ? "blink" : "#E11D48" });
+  banner(x, lines);
+  const lab = { LEO: "LEO objects", MEO: "MEO objects", ALL: "objects (LEO, MEO and higher)" }[filter];
+  $("count").textContent = `Showing ${n} ${lab}`;
+}
+function markTca(x, X, Y, e) { if (e.jd < simJd || e.jd > simJd + 1.5 * picked.periodMin / 1440) return; const st = OG.propJd(picked, e.jd); if (!st) return; const g = geo(e.jd, st.r); cross(x, X(g.lon), Y(g.lat), COL.NEAR); }
+
+// ---------- globe
+const STARS = Array.from({ length: 120 }, () => [Math.random(), Math.random(), Math.random() * 1.1 + 0.3]);
+function drawGlobe() {
+  const c = $("globe"), w = c.clientWidth, h = $("map").clientHeight || Math.round(w), { x } = fit(c, h);
+  x.fillStyle = "#0B1220"; x.fillRect(0, 0, w, h); STARS.forEach(([a, b, r]) => { x.fillStyle = "rgba(220,230,255,.22)"; x.fillRect(a * w, b * h, r * 0.7, r * 0.7); });
+  const big = filter !== "LEO" || (picked && picked.regime !== "LEO") || calcObjs.some((s) => s.regime !== "LEO");
+  const fitKm = big ? 28500 : 8800, scale = (Math.min(w, h) / 2 / fitKm) * view.zoom, cx = w / 2, cy = h / 2;
+  const cyw = Math.cos(view.yaw), syw = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+  const P = (r) => { const x1 = cyw * r[0] - syw * r[1], y1 = syw * r[0] + cyw * r[1], z1 = r[2], y2 = cp * y1 - sp * z1, z2 = sp * y1 + cp * z1; return { X: cx + x1 * scale, Y: cy - z2 * scale, d: y2 }; };
+  const R = OG.RE84 * scale, hidden = (q) => q.d > 0 && Math.hypot(q.X - cx, q.Y - cy) < R;
+  const gm = OG.gmst(simJd), cg = Math.cos(gm), sg = Math.sin(gm);
+  const surf = (lat, lon) => { const p = OG.geodeticToEcef(lat, lon, 0); return [cg * p[0] - sg * p[1], sg * p[0] + cg * p[1], p[2]]; };
+  x.fillStyle = "#2B6CB0"; x.beginPath(); x.arc(cx, cy, R, 0, 7); x.fill();
+  if (land) { x.fillStyle = "#C8B99A";
+    for (const poly of land) { const ring = poly[0]; let front = 0; const q = ring.map((p) => { const v = P(surf(p[1], p[0])); if (v.d <= 0) front++; return v; });
+      if (!front) continue; x.beginPath();
+      q.forEach((v, i) => { let X_ = v.X, Y_ = v.Y; if (v.d > 0) { const dx = X_ - cx, dy = Y_ - cy, k = R / (Math.hypot(dx, dy) || 1); X_ = cx + dx * k; Y_ = cy + dy * k; } i ? x.lineTo(X_, Y_) : x.moveTo(X_, Y_); });
+      x.closePath(); x.fill(); } }
+  const line = (arr, style) => { x.strokeStyle = style; x.lineWidth = 1; x.beginPath(); let on = false; arr.forEach((p) => { const q = P(p); if (q.d > 0) { on = false; return; } on ? x.lineTo(q.X, q.Y) : x.moveTo(q.X, q.Y); on = true; }); x.stroke(); };
+  for (let la = -60; la <= 60; la += 30) { const a = []; for (let lo = 0; lo <= 360; lo += 6) a.push(surf(la, lo)); line(a, la === 0 ? "rgba(255,255,255,.35)" : "rgba(255,255,255,.15)"); }
+  for (let lo = 0; lo < 360; lo += 30) { const a = []; for (let la = -90; la <= 90; la += 6) a.push(surf(la, lo)); line(a, "rgba(255,255,255,.15)"); }
+  x.strokeStyle = "rgba(160,200,255,.5)"; x.lineWidth = 2; x.beginPath(); x.arc(cx, cy, R + 1, 0, 7); x.stroke();
+  CFG.stations.forEach((st) => { const q = P(surf(st.lat, st.lon)); if (q.d <= 0) { x.fillStyle = "#FDE68A"; x.fillRect(q.X - 2.5, q.Y - 2.5, 5, 5); } });
+  if (CALC && CALC.station) { const q = P(surf(CALC.station.lat, CALC.station.lon)); if (q.d <= 0) { x.fillStyle = "#FB7185"; x.fillRect(q.X - 3.5, q.Y - 3.5, 7, 7); } }
+  const path3 = (arr, color, width, dash) => { x.strokeStyle = color; x.lineWidth = width; x.setLineDash(dash || []); x.beginPath(); let on = false;
+    arr.forEach((r) => { const q = P(r); if (hidden(q)) { on = false; return; } on ? x.lineTo(q.X, q.Y) : x.moveTo(q.X, q.Y); on = true; }); x.stroke(); x.setLineDash([]); };
+  const orbit = (s, color, width) => { const per = s.periodMin / 1440, arr = []; for (let jd = simJd - per / 2; jd <= simJd + per / 2; jd += per / 180) { const st = OG.propJd(s, jd); if (st) arr.push(st.r); } path3(arr, color, width); };
+  if (sel) orbit(sel, COL.SEL, 2);
+  calcObjs.forEach((s) => orbit(s, s.col, 2));
+  burns.forEach((b) => path3(b.g.filter((p) => Math.abs(p[0] - simJd) < 0.6 * (calcObjs[0] ? calcObjs[0].periodMin : 95) / 1440).map((p) => p[2]), b.color, 2, [6, 4]));
+  if (picked && picked !== sel && !picked.calc) orbit(picked, "#5EEAD4", 2.5);
+  gpts = []; const gcol = { IN: "#4ADE80", INTL: "#7DD3FC", DEB: "#E7E5E4" }, blinkers = [];
+  for (const s of drawOrder) { if (s.sel || s.calc || !visible(s)) continue; const st = cur(s); if (!st) continue; const q = P(st.r); if (hidden(q)) continue;
+    gpts.push([q.X, q.Y, s]);
+    if (isBlink(s)) { blinkers.push([q.X, q.Y]); continue; }
+    x.fillStyle = s.cj && !picked ? "#F87171" : gcol[s.cat]; x.globalAlpha = q.d > 0 ? 0.45 : 1; const r = s.cat === "DEB" ? 1.4 : 2.2; x.fillRect(q.X - r, q.Y - r, 2 * r, 2 * r); x.globalAlpha = 1;
+    if (pickNear.some((n) => n.o === s)) { x.strokeStyle = "#FCD34D"; x.lineWidth = 1.5; x.beginPath(); x.arc(q.X, q.Y, 6, 0, 7); x.stroke(); } }
+  blinkers.forEach(([px, py]) => drawBlink(x, px, py, 4));
+  const label = (s, color, ring, text) => { const st = OG.propJd(s, simJd); if (!st) return; const q = P(st.r); if (hidden(q)) return;
+    if (calcBlink.has(s) || pickConj.has(s)) drawBlink(x, q.X, q.Y, 6);
+    if (ring) { x.strokeStyle = ring; x.lineWidth = 2; x.beginPath(); x.arc(q.X, q.Y, 7, 0, 7); x.stroke(); }
+    x.fillStyle = color; x.beginPath(); x.arc(q.X, q.Y, 4.5, 0, 7); x.fill(); x.fillStyle = "#fff"; x.font = "600 12px system-ui"; x.fillText(text || s.name, q.X + 9, s.calc === "B" ? q.Y + 17 : q.Y - 7); gpts.push([q.X, q.Y, s]); };
+  if (sel) label(sel, COL.SEL, "#fff");
+  calcObjs.forEach((s) => label(s, s.col, "#fff", nameOf(s)));
+  burns.forEach((b) => { const r = burnPos(b, simJd); if (!r) return; const q = P(r); if (hidden(q)) return; x.strokeStyle = b.color; x.lineWidth = 2; x.beginPath(); x.arc(q.X, q.Y, 6, 0, 7); x.stroke(); });
+  if (CALC && CALC.tca) { const q = P(CALC.tca.r); if (!hidden(q)) cross(x, q.X, q.Y, "#FCD34D", "TCA"); }
+  if (picked && picked !== sel && !picked.calc) label(picked, gcol[picked.cat], "#5EEAD4");
+  x.fillStyle = "rgba(255,255,255,.6)"; x.font = "11px system-ui"; x.fillText("Dim dots are behind the Earth · green Indian · blue international · light grey debris", 10, h - 10);
+}
+
+// ---------- loop and controls
+function frame(ts) {
+  if (playing && lastTs) simJd += ((ts - lastTs) / 1000) * +$("speed").value / 86400;
+  lastTs = ts; frameNo++; $("clock").textContent = fmt(simJd); drawMap(); drawGlobe(); requestAnimationFrame(frame);
+}
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "❚❚ Pause" : "▶ Play"; };
+$("now").onclick = () => { simJd = CFG.simJd; tracks.clear(); if (picked) pick(picked); };
+if (CALC) { $("calcTime").style.display = ""; $("calcTime").onclick = () => { simJd = CALC.startJd; tracks.clear(); if (picked) pick(picked); renderPick(); };
+  $("legend").insertAdjacentHTML("beforeend", CALC.objects.map((o) => `<span><i style="background:${o.color}"></i>Calculator object ${o.id}</span>`).join("") +
+    `<span><span style="color:#E11D48">━ ━</span> Manoeuvred path</span><span><span style="color:#A16207;font-weight:700">✕</span> Closest approach</span>`); }
+$("filter").querySelectorAll("button").forEach((b) => b.onclick = () => { filter = b.dataset.f; $("filter").querySelectorAll("button").forEach((z) => z.classList.toggle("on", z === b)); view.zoom = 1; });
+function nearest(list, mx, my, maxD) { let best = null, bd = maxD; for (const p of list) { const d = Math.hypot(p[0] - mx, p[1] - my); if (d < bd) { bd = d; best = p; } } return best; }
+function showTip(tip, mx, my, html) { tip.innerHTML = html; tip.style.display = "block"; tip.style.left = (mx + 22) + "px"; tip.style.top = (my + 34) + "px"; }
+function objTip(s) {
+  const st = OG.propJd(s, simJd), g = st ? geo(simJd, st.r) : null, cj = pickConj.get(s);
+  return `<b>${esc(nameOf(s))}</b><br>${kindOf(s)} · ${s.regime}` + (g ? `<br>alt ${g.alt.toFixed(0)} km · ${g.lat.toFixed(1)}°, ${g.lon.toFixed(1)}°` : "") +
+    (cj ? `<br>⚠ ${km(cj.miss)} from ${esc(nameOf(picked))} at ${fmt(cj.jd, false)}` : "") + `<br><i>Click to trace its path</i>`;
+}
+const m = $("map"), tip = $("tip");
+m.addEventListener("mousemove", (e) => { const r = m.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, best = nearest(pts, mx, my, 8);
+  m.style.cursor = best && !best[2].station ? "pointer" : "default";
+  if (!best) { tip.style.display = "none"; return; }
+  const s = best[2];
+  if (s.station) showTip(tip, mx, my, `<b>${esc(s.station.name)}</b><br>${esc(s.station.type)}<br>${s.station.lat.toFixed(3)}°, ${s.station.lon.toFixed(3)}°`);
+  else showTip(tip, mx, my, objTip(s)); });
+m.addEventListener("mouseleave", () => (tip.style.display = "none"));
+m.addEventListener("click", (e) => { const r = m.getBoundingClientRect(), best = nearest(pts.filter((p) => !p[2].station), e.clientX - r.left, e.clientY - r.top, 8); pick(best ? best[2] : null); });
+const g = $("globe"), tip2 = $("tip2"); let drag = null;
+g.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch, moved: false }; g.setPointerCapture(e.pointerId); });
+g.addEventListener("pointermove", (e) => { const r = g.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (drag) { if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) drag.moved = true;
+    view.yaw = drag.yaw - (e.clientX - drag.x) * 0.01; view.pitch = Math.max(-1.5, Math.min(1.5, drag.pitch + (e.clientY - drag.y) * 0.01)); tip2.style.display = "none"; return; }
+  const best = nearest(gpts, mx, my, 8); g.style.cursor = best ? "pointer" : "grab";
+  if (!best) { tip2.style.display = "none"; return; } showTip(tip2, mx, my, objTip(best[2])); });
+g.addEventListener("pointerup", (e) => { const wasClick = drag && !drag.moved; drag = null;
+  if (wasClick) { const r = g.getBoundingClientRect(), best = nearest(gpts, e.clientX - r.left, e.clientY - r.top, 8); pick(best ? best[2] : null); } });
+g.addEventListener("mouseleave", () => (tip2.style.display = "none"));
+g.addEventListener("wheel", (e) => { e.preventDefault(); view.zoom = Math.max(0.4, Math.min(6, view.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); }, { passive: false });
+window.addEventListener("resize", () => (mapSize = ""));
+renderPick(); loadLand(); requestAnimationFrame(frame);
+})();
+</script>
+</body></html>
