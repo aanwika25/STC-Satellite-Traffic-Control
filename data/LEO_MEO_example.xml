@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SpaceObjectsCatalog>
+    <!-- LEO Object Example: International Space Station (ISS) -->
+    <SpaceObject noradId="25544" orbitCategory="LEO" status="Active">
+        <ObjectName>ISS (ZARYA)</ObjectName>
+        <!-- Cartesian Coordinates in ECI (Earth-Centered Inertial) frame -->
+        <PositionCoordinates referenceFrame="ECI">
+            <X_km>4200.125</X_km>
+            <Y_km>-5300.450</Y_km>
+            <Z_km>3100.890</Z_km>
+        </PositionCoordinates>
+        <VelocityCoordinates referenceFrame="ECI">
+            <Vx_kms>4.560</Vx_kms>
+            <Vy_kms>5.120</Vy_kms>
+            <Vz_kms>-3.450</Vz_kms>
+        </VelocityCoordinates>
+        <!-- Orbital Positioning Parameters -->
+        <KeplerianElements>
+            <Inclination_deg>51.64</Inclination_deg>
+            <Eccentricity>0.0003</Eccentricity>
+            <RightAscension_deg>124.56</RightAscension_deg>
+            <MeanAnomaly_deg>89.12</MeanAnomaly_deg>
+            <OperatingAltitude_km>420</OperatingAltitude_km>
+        </KeplerianElements>
+        <Timestamp>2026-11-22T12:00:00Z</Timestamp>
+    </SpaceObject>
+
+    <!-- MEO Object Example: GPS Block III Satellite -->
+    <SpaceObject noradId="43873" orbitCategory="MEO" status="Active">
+        <ObjectName>NAVSTAR 77 (USA 289)</ObjectName>
+        <!-- Cartesian Coordinates in ECI (Earth-Centered Inertial) frame -->
+        <PositionCoordinates referenceFrame="ECI">
+            <X_km>15200.400</X_km>
+            <Y_km>20100.750</Y_km>
+            <Z_km>-11050.200</Z_km>
+        </PositionCoordinates>
+        <VelocityCoordinates referenceFrame="ECI">
+            <Vx_kms>-2.150</Vx_kms>
+            <Vy_kms>1.850</Vy_kms>
+            <Vz_kms>2.900</Vz_kms>
+        </VelocityCoordinates>
+        <!-- Orbital Positioning Parameters -->
+        <KeplerianElements>
+            <Inclination_deg>55.0</Inclination_deg>
+            <Eccentricity>0.015</Eccentricity>
+            <RightAscension_deg>210.45</RightAscension_deg>
+            <MeanAnomaly_deg>45.80</MeanAnomaly_deg>
+            <OperatingAltitude_km>20200</OperatingAltitude_km>
+        </KeplerianElements>
+        <Timestamp>2026-11-22T12:00:00Z</Timestamp>
+    </SpaceObject>
+</SpaceObjectsCatalog>
